@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+  <head><title>Prod Web App</title></head>
+  <body>
+    <h1>Prod Web App</h1>
+    <table border="1">
+      <tr><th>ID</th><th>Message</th><th>Timestamp</th></tr>
+      {% for r in rows %}
+      <tr><td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td></tr>
+      {% endfor %}
+    </table>
+  </body>
+</html>
