@@ -75,15 +75,19 @@ jobs:
           CONTAINER_NAME=prod-web-container
           IMAGE_URI=${{ needs.build-and-push.outputs.image-uri }}
 
+          # Get current task definition
           CURRENT_TASK=$(aws ecs describe-services --cluster $CLUSTER --services $SERVICE --query 'services[0].taskDefinition' --output text)
           TASK_JSON=$(aws ecs describe-task-definition --task-definition $CURRENT_TASK --query 'taskDefinition' --output json)
 
-          NEW_TASK=$(echo "$TASK_JSON" | jq "del(.status,.revision,.taskDefinitionArn,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy) | .containerDefinitions |= map(if .name==\"$CONTAINER_NAME\" then .image=\"$IMAGE_URI\" else . end)")
+          # Create new task definition JSON with updated image
+          NEW_TASK=$(echo "$TASK_JSON" | jq "del(.status,.revision,.taskDefinitionArn,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt,.enableFaultInjection) | .containerDefinitions |= map(if .name==\"$CONTAINER_NAME\" then .image=\"$IMAGE_URI\" else . end)")
 
           echo "$NEW_TASK" > /tmp/new-task.json
-          aws ecs register-task-definition --cli-input-json file:///tmp/new-task.json
 
-          NEW_TASK_ARN=$(aws ecs list-task-definitions --family-prefix $TASK_FAMILY --sort DESC --max-items 1 --query 'taskDefinitionArns[0]' --output text)
+          # Register new task definition and capture ARN
+          NEW_TASK_ARN=$(aws ecs register-task-definition --cli-input-json file:///tmp/new-task.json --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          # Update ECS service with new task definition
           aws ecs update-service --cluster $CLUSTER --service $SERVICE --task-definition $NEW_TASK_ARN
 
           echo "✅ ECS service updated with new image: $IMAGE_URI"
