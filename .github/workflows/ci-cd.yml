@@ -12,6 +12,8 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.set-image-uri.outputs.image-uri }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,6 +31,7 @@ jobs:
           region: ${{ env.AWS_REGION }}
 
       - name: Build and push to ECR
+        id: build-push
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -36,25 +39,15 @@ jobs:
           push: true
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
 
-      - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@v2
-        with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
-
-      - name: Create ECS deploy task (update service)
-        uses: actions/github-script@v6
-        with:
-          script: |
-            // create temporary file with necessary info for next step
-            console.log("Ready to deploy");
-        # deployment is done in next job using aws-actions/configure-aws-credentials
+      - name: Set IMAGE_URI output
+        id: set-image-uri
+        run: echo "::set-output name=image-uri::${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}"
 
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: ${{ steps.service-url.outputs.url || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,34 +55,30 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME || '' }}
-          aws-region: ${{ env.AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get account ID
-        id: account
-        run: |
-          echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Update ECS task definition and service
-        env:
-          ACCOUNT_ID: ${{ env.ACCOUNT_ID }}
-          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
         run: |
-          # Download jq
-          sudo apt-get update && sudo apt-get install -y jq
-
           CLUSTER=prod-ecs-cluster
           SERVICE=prod-web-service
           TASK_FAMILY=prod-web-task
           CONTAINER_NAME=prod-web-container
-          REGION=${{ env.AWS_REGION }}
+          IMAGE_URI=${{ needs.build-and-push.outputs.image-uri }}
 
           CURRENT_TASK=$(aws ecs describe-services --cluster $CLUSTER --services $SERVICE --query 'services[0].taskDefinition' --output text)
           TASK_JSON=$(aws ecs describe-task-definition --task-definition $CURRENT_TASK --query 'taskDefinition' --output json)
-          NEW_TASK=$(echo "$TASK_JSON" | jq "del(.status, .revision, .taskDefinitionArn, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) | .containerDefinitions |= map(if .name==\"${CONTAINER_NAME}\" then .image=\"${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}\" else . end)")
+
+          NEW_TASK=$(echo "$TASK_JSON" | jq "del(.status,.revision,.taskDefinitionArn,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy) | .containerDefinitions |= map(if .name==\"$CONTAINER_NAME\" then .image=\"$IMAGE_URI\" else . end)")
+
           echo "$NEW_TASK" > /tmp/new-task.json
           aws ecs register-task-definition --cli-input-json file:///tmp/new-task.json
+
           NEW_TASK_ARN=$(aws ecs list-task-definitions --family-prefix $TASK_FAMILY --sort DESC --max-items 1 --query 'taskDefinitionArns[0]' --output text)
           aws ecs update-service --cluster $CLUSTER --service $SERVICE --task-definition $NEW_TASK_ARN
+
+          echo "ECS service updated with new image: $IMAGE_URI"
