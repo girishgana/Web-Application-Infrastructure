@@ -69,7 +69,7 @@ jobs:
 
       - name: Update ECS task definition and service
         run: |
-          CLUSTER=prod-ecs-cluster
+          CLUSTER=prod-ecs-cluster3
           SERVICE=prod-web-service
           TASK_FAMILY=prod-web-task
           CONTAINER_NAME=prod-web-container
