@@ -4,7 +4,7 @@ set -e
 
 AWS_PROFILE=${1:-default}
 REGION=${2:-ap-south-1}
-CLUSTER=${3:-prod-ecs-cluster3}
+CLUSTER=${3:-prod-ecs-cluster}
 SERVICE=${4:-prod-web-service}
 TASK_FAMILY=${5:-prod-web-task}
 CONTAINER_NAME=${6:-prod-web-container}
