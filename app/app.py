@@ -28,7 +28,7 @@ def index():
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("CREATE TABLE IF NOT EXISTS visits (id serial PRIMARY KEY, msg text, ts timestamptz DEFAULT now());")
-        cur.execute("INSERT INTO visits (msg) VALUES (%s) RETURNING id;", ("Hello from Flask",))
+        cur.execute("INSERT INTO visits (msg) VALUES (%s) RETURNING my_id;", ("Hello from Flask",))
         conn.commit()
         cur.execute("SELECT id, msg, ts FROM visits ORDER BY ts DESC LIMIT 10;")
         rows = cur.fetchall()
